@@ -1,30 +1,35 @@
 /*
- * Blink
+ * Blink with Serial Output
  * Turns on an LED on for one second,
  * then off for one second, repeatedly.
+ * Prints LED status to the Serial Monitor.
  */
 
 #include <Arduino.h>
 
-// Set LED_BUILTIN if it is not defined by Arduino framework
-#ifndef LED_BUILTIN
-    #define LED_BUILTIN 2
-#endif
+#define LED_PIN 13
 
 void setup()
 {
-  // initialize LED digital pin as an output.
-  pinMode(LED_BUILTIN, OUTPUT);
+  // Initialize LED digital pin as an output.
+  pinMode(LED_PIN, OUTPUT);
+
+  // Initialize serial communication at 9600 bits per second
+  Serial.begin(115200);
+  Serial.println("Blink sketch started!");
 }
 
 void loop()
 {
-  // turn the LED on (HIGH is the voltage level)
-  digitalWrite(LED_BUILTIN, HIGH);
-  // wait for a second
+  // Turn the LED on (HIGH is the voltage level)
+  digitalWrite(LED_PIN, HIGH);
+  Serial.println("LED is ON");
+  // Wait for a second
   delay(1000);
-  // turn the LED off by making the voltage LOW
-  digitalWrite(LED_BUILTIN, LOW);
-   // wait for a second
+
+  // Turn the LED off by making the voltage LOW
+  digitalWrite(LED_PIN, LOW);
+  Serial.println("LED is OFF");
+  // Wait for a second
   delay(1000);
 }
