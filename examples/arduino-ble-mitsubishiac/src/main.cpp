@@ -14,28 +14,61 @@ IRMitsubishiAC ac(kIrLed);  // Set the GPIO used for sending messages.
 
 static NimBLEServer* pServer;
 
+void parseCommand(const std::string &cmd, int &temp, String &mode, String &preset) {
+  temp = 24;   // 默认温度
+  mode = "COOL";
+  preset = "NORMAL";
+
+  if (cmd.find("TEMP:") != std::string::npos) {
+    size_t start = cmd.find("TEMP:") + 5;
+    size_t end = cmd.find(';', start);
+    temp = atoi(cmd.substr(start, end - start).c_str());
+  }
+
+  if (cmd.find("MODE:") != std::string::npos) {
+    size_t start = cmd.find("MODE:") + 5;
+    size_t end = cmd.find(';', start);
+    mode = cmd.substr(start, end - start).c_str();
+  }
+
+  if (cmd.find("PRESET:") != std::string::npos) {
+    size_t start = cmd.find("PRESET:") + 7;
+    size_t end = cmd.find(';', start);
+    preset = cmd.substr(start, end - start).c_str();
+  }
+}
+
 class LEDCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
         std::string value = pCharacteristic->getValue();
-        if (value.length() > 0) {
-            if (value[0] == '1') {
-                digitalWrite(LED_PIN, HIGH); 
-                Serial.println("LED ON");
-	        ac.on();
-		ac.setFan(1);
-		ac.setMode(kMitsubishiAcCool);
-		ac.setTemp(26);
-		ac.setVane(kMitsubishiAcVaneAuto);
-            } else {
-                digitalWrite(LED_PIN, LOW);
-                Serial.println("LED OFF");
-		ac.off();
-            }
-	    ac.send();
-        }      
-        Serial.printf("%s : onWrite(), value: %s\n",
-                      pCharacteristic->getUUID().toString().c_str(),
-                      pCharacteristic->getValue().c_str());
+        if (value.empty()) return;
+        Serial.printf("[BLE] 收到命令: %s\n", value.c_str());
+        int temp;
+        String mode;
+        String preset;
+        parseCommand(value, temp, mode, preset);
+        Serial.printf("[解析结果] 温度=%d, 模式=%s, 预设=%s\n", temp, mode.c_str(), preset.c_str());
+        // ------------------------------
+        // 配置并发送红外命令
+        // ------------------------------
+        ac.on();
+        ac.setTemp(temp);
+        if (mode.equalsIgnoreCase("COOL")) {
+          ac.setMode(kMitsubishiAcCool);
+        } else if (mode.equalsIgnoreCase("HEAT")) {
+          ac.setMode(kMitsubishiAcHeat);
+        } else if (mode.equalsIgnoreCase("DRY")) {
+          ac.setMode(kMitsubishiAcDry);
+        } else if (mode.equalsIgnoreCase("FAN")) {
+          ac.setMode(kMitsubishiAcFan);
+	} else if (mode.equalsIgnoreCase("OFF")) {
+          ac.off();
+        } else {
+          ac.setMode(kMitsubishiAcAuto);
+        }
+        // 可根据 PRESET 添加风速、节能等设置
+        ac.send();
+        Serial.println("[IR] 红外指令已发送。");
     }
 } ledCallbacks;
 
