@@ -7,10 +7,9 @@
 #include <IRsend.h>
 #include <ir_Mitsubishi.h>
 
+#define LED_PIN 12
 const uint16_t kIrLed = 7;  // ESP8266 GPIO pin to use. Recommended: 4 (D2).
 IRMitsubishiAC ac(kIrLed);  // Set the GPIO used for sending messages.
-
-#define LED_PIN 12
 
 static NimBLEServer* pServer;
 
@@ -38,7 +37,7 @@ void parseCommand(const std::string &cmd, int &temp, String &mode, String &prese
   }
 }
 
-class LEDCallbacks : public NimBLECharacteristicCallbacks {
+class ACCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
         std::string value = pCharacteristic->getValue();
         if (value.empty()) return;
@@ -51,17 +50,19 @@ class LEDCallbacks : public NimBLECharacteristicCallbacks {
         // ------------------------------
         // 配置并发送红外命令
         // ------------------------------
+	digitalWrite(LED_PIN, HIGH);
         ac.on();
         ac.setTemp(temp);
         if (mode.equalsIgnoreCase("COOL")) {
           ac.setMode(kMitsubishiAcCool);
         } else if (mode.equalsIgnoreCase("HEAT")) {
           ac.setMode(kMitsubishiAcHeat);
-        } else if (mode.equalsIgnoreCase("DRY")) {
-          ac.setMode(kMitsubishiAcDry);
-        } else if (mode.equalsIgnoreCase("FAN")) {
+        } else if (mode.equalsIgnoreCase("HEAT_COOL")) {
+          ac.setMode(kMitsubishiAcAuto);
+        } else if (mode.equalsIgnoreCase("FAN_ONLY")) {
           ac.setMode(kMitsubishiAcFan);
 	} else if (mode.equalsIgnoreCase("OFF")) {
+	  digitalWrite(LED_PIN, LOW);
           ac.off();
         } else {
           ac.setMode(kMitsubishiAcAuto);
@@ -70,7 +71,7 @@ class LEDCallbacks : public NimBLECharacteristicCallbacks {
         ac.send();
         Serial.println("[IR] 红外指令已发送。");
     }
-} ledCallbacks;
+} acCallbacks;
 
 /**  None of these are required as they will be handled by the library with defaults. **
  **                       Remove as you see fit for your needs                        */
@@ -126,60 +127,6 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     }
 } serverCallbacks;
 
-/** Handler class for characteristic actions */
-class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
-    void onRead(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
-        Serial.printf("%s : onRead(), value: %s\n",
-                      pCharacteristic->getUUID().toString().c_str(),
-                      pCharacteristic->getValue().c_str());
-    }
-
-    void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
-        Serial.printf("%s : onWrite(), value: %s\n",
-                      pCharacteristic->getUUID().toString().c_str(),
-                      pCharacteristic->getValue().c_str());
-    }
-
-    /**
-     *  The value returned in code is the NimBLE host return code.
-     */
-    void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
-        Serial.printf("Notification/Indication return code: %d, %s\n", code, NimBLEUtils::returnCodeToString(code));
-    }
-
-    /** Peer subscribed to notifications/indications */
-    void onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo, uint16_t subValue) override {
-        std::string str  = "Client ID: ";
-        str             += connInfo.getConnHandle();
-        str             += " Address: ";
-        str             += connInfo.getAddress().toString();
-        if (subValue == 0) {
-            str += " Unsubscribed to ";
-        } else if (subValue == 1) {
-            str += " Subscribed to notifications for ";
-        } else if (subValue == 2) {
-            str += " Subscribed to indications for ";
-        } else if (subValue == 3) {
-            str += " Subscribed to notifications and indications for ";
-        }
-        str += std::string(pCharacteristic->getUUID());
-
-        Serial.printf("%s\n", str.c_str());
-    }
-} chrCallbacks;
-
-/** Handler class for descriptor actions */
-class DescriptorCallbacks : public NimBLEDescriptorCallbacks {
-    void onWrite(NimBLEDescriptor* pDescriptor, NimBLEConnInfo& connInfo) override {
-        std::string dscVal = pDescriptor->getValue();
-        Serial.printf("Descriptor written value: %s\n", dscVal.c_str());
-    }
-
-    void onRead(NimBLEDescriptor* pDescriptor, NimBLEConnInfo& connInfo) override {
-        Serial.printf("%s Descriptor read\n", pDescriptor->getUUID().toString().c_str());
-    }
-} dscCallbacks;
-
 void setup(void) {
     ac.begin();
     Serial.begin(115200);
@@ -213,70 +160,30 @@ void setup(void) {
     pServer = NimBLEDevice::createServer();
     pServer->setCallbacks(&serverCallbacks);
 
-    NimBLEService*        pLEDService = pServer->createService("FFF1");
-    NimBLECharacteristic* pLEDCharacteristic =
-        pLEDService->createCharacteristic("FFF2",
+    NimBLEService*        pACService = pServer->createService("FFF1");
+    NimBLECharacteristic* pACCharacteristic =
+        pACService->createCharacteristic("FFF2",
                                            NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE |
                                                /** Require a secure connection for read and write access */
                                                NIMBLE_PROPERTY::READ_ENC | // only allow reading if paired / encrypted
                                                NIMBLE_PROPERTY::WRITE_ENC  // only allow writing if paired / encrypted
         );
 
-    pLEDCharacteristic->setValue("0");
-    pLEDCharacteristic->setCallbacks(&ledCallbacks); 
+    pACCharacteristic->setValue("0");
+    pACCharacteristic->setCallbacks(&acCallbacks); 
     
-    NimBLEService*        pDeadService = pServer->createService("DEAD");
-    NimBLECharacteristic* pBeefCharacteristic =
-        pDeadService->createCharacteristic("BEEF",
-                                           NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE |
-                                               /** Require a secure connection for read and write access */
-                                               NIMBLE_PROPERTY::READ_ENC | // only allow reading if paired / encrypted
-                                               NIMBLE_PROPERTY::WRITE_ENC  // only allow writing if paired / encrypted
-        );
-
-    pBeefCharacteristic->setValue("Burger");
-    pBeefCharacteristic->setCallbacks(&chrCallbacks);
-
-    /**
-     *  2902 and 2904 descriptors are a special case, when createDescriptor is called with
-     *  either of those uuid's it will create the associated class with the correct properties
-     *  and sizes. However we must cast the returned reference to the correct type as the method
-     *  only returns a pointer to the base NimBLEDescriptor class.
-     */
-    NimBLE2904* pBeef2904 = pBeefCharacteristic->create2904();
-    pBeef2904->setFormat(NimBLE2904::FORMAT_UTF8);
-    pBeef2904->setCallbacks(&dscCallbacks);
-
-    NimBLEService*        pBaadService = pServer->createService("BAAD");
-    NimBLECharacteristic* pFoodCharacteristic =
-        pBaadService->createCharacteristic("F00D", NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
-
-    pFoodCharacteristic->setValue("Fries");
-    pFoodCharacteristic->setCallbacks(&chrCallbacks);
-
-    /** Custom descriptor: Arguments are UUID, Properties, max length of the value in bytes */
-    NimBLEDescriptor* pC01Ddsc =
-        pFoodCharacteristic->createDescriptor("C01D",
-                                              NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_ENC,
-                                              20);
-    pC01Ddsc->setValue("Send it back!");
-    pC01Ddsc->setCallbacks(&dscCallbacks);
-
     /** Start the services when finished creating all Characteristics and Descriptors */
-    pLEDService->start();
-    pDeadService->start();
-    pBaadService->start();
+    pACService->start();
 
     /** Create an advertising instance and add the services to the advertised data */
     NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->setName("NimBLE-Server");
-    pAdvertising->addServiceUUID(pDeadService->getUUID());
-    pAdvertising->addServiceUUID(pBaadService->getUUID());
+    pAdvertising->addServiceUUID(pACService->getUUID());
     /**
      *  If your device is battery powered you may consider setting scan response
      *  to false as it will extend battery life at the expense of less data sent.
      */
-    pAdvertising->enableScanResponse(true);
+    pAdvertising->enableScanResponse(false);
     pAdvertising->start();
 
     Serial.printf("Advertising Started\n");
@@ -285,14 +192,4 @@ void setup(void) {
 void loop() {
     /** Loop here and send notifications to connected peers */
     delay(2000);
-
-    if (pServer->getConnectedCount()) {
-        NimBLEService* pSvc = pServer->getServiceByUUID("BAAD");
-        if (pSvc) {
-            NimBLECharacteristic* pChr = pSvc->getCharacteristic("F00D");
-            if (pChr) {
-                pChr->notify();
-            }
-        }
-    }
 }
